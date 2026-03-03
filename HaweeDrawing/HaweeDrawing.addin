@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Hawee Pipe Exporter</Name>
+    <Assembly>HaweeDrawing.dll</Assembly>
+    <AddInId>A1B2C3D4-E5F6-4A5B-8C9D-0E1F2A3B4C5D</AddInId>
+    <FullClassName>HaweeDrawing.App</FullClassName>
+    <VendorId>HAWEE</VendorId>
+    <VendorDescription>Hawee Tools - Revit Utilities</VendorDescription>
+  </AddIn>
+</RevitAddIns>
