@@ -91,7 +91,6 @@
     <Compile Include="Services\FamilyLoadService.cs" />
     <Compile Include="Services\JsonExportService.cs" />
     <Compile Include="Services\PipeCollectorService.cs" />
-    <Compile Include="Services\PipeCreationService.cs" />
     <Compile Include="Services\PipeCreationServiceNew.cs" />
     <Compile Include="Services\UnitConverter.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
