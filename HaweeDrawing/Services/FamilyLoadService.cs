@@ -47,9 +47,8 @@ namespace HaweeDrawing.Services
                     if (LoadFamily(doc, rfaFile))
                         loadedCount++;
                 }
-                catch (Exception ex)
+                catch
                 {
-                    System.Diagnostics.Debug.WriteLine($"Failed to load family: {rfaFile} - {ex.Message}");
                 }
             }
 
@@ -74,26 +73,15 @@ namespace HaweeDrawing.Services
                     .FirstOrDefault(f => f.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase));
 
                 if (existingFamily != null)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Family already loaded: {familyName}");
                     return true;
-                }
 
-                // Load the family
                 Family family;
                 bool loaded = doc.LoadFamily(familyPath, out family);
 
-                if (loaded && family != null)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Successfully loaded family: {familyName}");
-                    return true;
-                }
-
-                return false;
+                return loaded && family != null;
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine($"Error loading family {familyPath}: {ex.Message}");
                 return false;
             }
         }
@@ -103,21 +91,32 @@ namespace HaweeDrawing.Services
             if (doc == null || string.IsNullOrEmpty(familyName))
                 return null;
 
-            // First, try to find existing symbol
             var existingSymbol = FindFamilySymbol(doc, familyName, typeName);
             if (existingSymbol != null)
+            {
+                if (!existingSymbol.IsActive)
+                {
+                    try { existingSymbol.Activate(); doc.Regenerate(); }
+                    catch { }
+                }
                 return existingSymbol;
+            }
 
-            // If not found and search directory is provided, try to load from .rfa file
             if (!string.IsNullOrEmpty(searchDirectory) && Directory.Exists(searchDirectory))
             {
                 var rfaPath = FindFamilyFile(searchDirectory, familyName);
-                if (!string.IsNullOrEmpty(rfaPath))
+                if (!string.IsNullOrEmpty(rfaPath) && LoadFamily(doc, rfaPath))
                 {
-                    if (LoadFamily(doc, rfaPath))
+                    doc.Regenerate();
+                    var newSymbol = FindFamilySymbol(doc, familyName, typeName);
+                    if (newSymbol != null)
                     {
-                        // Try to find again after loading
-                        return FindFamilySymbol(doc, familyName, typeName);
+                        if (!newSymbol.IsActive)
+                        {
+                            try { newSymbol.Activate(); doc.Regenerate(); }
+                            catch { }
+                        }
+                        return newSymbol;
                     }
                 }
             }
@@ -127,24 +126,124 @@ namespace HaweeDrawing.Services
 
         private FamilySymbol FindFamilySymbol(Document doc, string familyName, string typeName)
         {
-            var collector = new FilteredElementCollector(doc)
-                .OfClass(typeof(FamilySymbol))
-                .OfCategory(BuiltInCategory.OST_PipeFitting)
-                .Cast<FamilySymbol>();
+            // List of categories to search for fittings
+            var categoriesToSearch = new List<BuiltInCategory>
+            {
+                BuiltInCategory.OST_PipeFitting,
+                BuiltInCategory.OST_PipeAccessory,
+                BuiltInCategory.OST_MechanicalEquipment,
+                BuiltInCategory.OST_PlumbingFixtures,
+                BuiltInCategory.OST_GenericModel
+            };
 
-            // Try exact match first
-            var exactMatch = collector.FirstOrDefault(fs =>
-                fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase) &&
-                fs.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase));
+            // Try to find in specific categories first
+            foreach (var category in categoriesToSearch)
+            {
+                try
+                {
+                    var collector = new FilteredElementCollector(doc)
+                        .OfClass(typeof(FamilySymbol))
+                        .OfCategory(category)
+                        .Cast<FamilySymbol>();
 
-            if (exactMatch != null)
-                return exactMatch;
+                    // Try exact match first (both family name and type name)
+                    var exactMatch = collector.FirstOrDefault(fs =>
+                        fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase) &&
+                        fs.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase));
 
-            // Try family name only
-            var familyMatch = collector.FirstOrDefault(fs =>
-                fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase));
+                    if (exactMatch != null)
+                        return exactMatch;
 
-            return familyMatch;
+                    var familyMatch = collector.FirstOrDefault(fs =>
+                        fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase));
+
+                    if (familyMatch != null)
+                        return familyMatch;
+                }
+                catch
+                {
+                }
+            }
+
+            try
+            {
+                var allSymbols = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FamilySymbol))
+                    .Cast<FamilySymbol>();
+
+                var exactMatch = allSymbols.FirstOrDefault(fs =>
+                    fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase) &&
+                    fs.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase));
+
+                if (exactMatch != null)
+                    return exactMatch;
+
+                var familyMatch = allSymbols.FirstOrDefault(fs =>
+                    fs.Family.Name.Equals(familyName, StringComparison.OrdinalIgnoreCase));
+
+                if (familyMatch != null)
+                    return familyMatch;
+
+                return FindFuzzyMatch(allSymbols.ToList(), familyName, typeName);
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private FamilySymbol FindFuzzyMatch(List<FamilySymbol> symbols, string familyName, string typeName)
+        {
+            // Define common fitting type keywords and their generic equivalents
+            var fittingTypeMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Elbow", new[] { "elbow", "codo", "coude", "bend", "90", "45" } },
+                { "Tee", new[] { "tee", "t-piece", "t-branch", "branch", "trap", "siphon", "si phon" } },
+                { "Cross", new[] { "cross", "cruz", "croix", "4-way" } },
+                { "Cap", new[] { "cap", "tapa", "bouchon", "end cap", "plug" } },
+                { "Coupling", new[] { "coupling", "union", "connector", "socket", "joint", "flexible joint" } },
+                { "Transition", new[] { "transition", "reducer", "reduction", "concentric", "eccentric" } },
+                { "Flange", new[] { "flange", "brida", "bride" } },
+                { "Valve", new[] { "valve", "valvula", "vanne" } }
+            };
+
+            // Extract the type from family name (e.g., "HWE_uPVC_Siphon" -> might contain "Siphon", "Trap", etc.)
+            string lowerFamilyName = familyName.ToLower();
+            string lowerTypeName = (typeName ?? "").ToLower();
+
+            foreach (var mapping in fittingTypeMap)
+            {
+                string genericType = mapping.Key; // e.g., "Elbow"
+                string[] keywords = mapping.Value;
+
+                // Check if any keyword matches
+                bool familyMatches = keywords.Any(kw => lowerFamilyName.Contains(kw));
+                bool typeMatches = keywords.Any(kw => lowerTypeName.Contains(kw));
+
+                if (familyMatches || typeMatches)
+                {
+                    var match = symbols.FirstOrDefault(fs =>
+                        fs.Family.Name.IndexOf(genericType, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        fs.Family.Name.IndexOf("Generic", StringComparison.OrdinalIgnoreCase) >= 0 && 
+                        fs.Family.Name.IndexOf(genericType, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                    if (match != null)
+                        return match;
+                }
+            }
+
+            if (lowerFamilyName.Contains("sprinkler") || lowerTypeName.Contains("sprinkler"))
+            {
+                var coupling = symbols.FirstOrDefault(fs => 
+                    fs.Family.Name.IndexOf("Coupling", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fs.Family.Name.IndexOf("Tee", StringComparison.OrdinalIgnoreCase) >= 0);
+                
+                if (coupling != null)
+                    return coupling;
+            }
+
+            return null;
         }
 
         private string FindFamilyFile(string searchDirectory, string familyName)
