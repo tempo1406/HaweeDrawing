@@ -9,7 +9,7 @@ using System.Windows;
 
 namespace HaweeDrawing.Commands
 {
-    [Transaction(TransactionMode.ReadOnly)]
+    [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
     public class ExportPipesCommand : IExternalCommand
     {
@@ -30,8 +30,9 @@ namespace HaweeDrawing.Commands
                 var unitConverter = new UnitConverter();
                 var pipeCollectorService = new PipeCollectorService(unitConverter);
                 var jsonExportService = new JsonExportService();
+                var sheetExportService = new SheetExportService();
 
-                var viewModel = new MainViewModel(doc, pipeCollectorService, jsonExportService);
+                var viewModel = new MainViewModel(doc, pipeCollectorService, jsonExportService, sheetExportService);
                 var window = new MainWindow
                 {
                     DataContext = viewModel
